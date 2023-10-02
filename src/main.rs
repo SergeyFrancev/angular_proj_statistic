@@ -27,9 +27,7 @@ fn main() {
 
     use std::time::Instant;
     let now = Instant::now();
-    // let path = String::from(parth_to_dir);
     let dir = Path::new(parth_to_dir);
-    // let stat = file_stat(dir);
     let stat = read_path(dir);
     println!("Count .ts files: {}", stat.count_ts);
     println!("Count CLASS in files: {}", stat.count_class);
@@ -40,7 +38,6 @@ fn main() {
 }
 
 fn read_path(parth: &Path) -> DirStat {
-    // let mut count_ts = 0;
     let mut stat = DirStat::new();
 
     let item = Path::new(parth);
@@ -49,7 +46,6 @@ fn read_path(parth: &Path) -> DirStat {
         match extension {
             Some("ts") => {
                 stat.count_ts += 1;
-                // println!("- {}", parth.display());
                 let file_result = read_file(parth);
 
                 for elem in file_result.iter_elements() {
@@ -57,17 +53,13 @@ fn read_path(parth: &Path) -> DirStat {
                         Some(_) => {
                             if elem.decorator().is_none() || (elem.decorator().is_some() && elem.decorator().unwrap() != "NgModule")
                             {
-                                // println!("- {}", elem.count_attrs());
                                 stat.add_class(elem.class_name().unwrap().to_string());
                                 stat.count_attr += elem.count_attrs();
                             }
                         }
                         None => {}
                     }
-                    // stat.add_class(elem.class_name())
                 }
-                // stat.count_class += file_result.count_classes();
-                // stat.add(file_stat(item.as_os_str()))
             }
             Some(_e) => {}
             None => {}

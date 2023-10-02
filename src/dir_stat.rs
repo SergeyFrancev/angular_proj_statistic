@@ -19,7 +19,6 @@ impl DirStat {
         self.count_ts += stat.count_ts;
         self.count_class += stat.count_class;
         self.count_attr += stat.count_attr;
-        // self.class_list.concat();
         self.class_list.extend(stat.class_list)
     }
 

@@ -13,32 +13,120 @@ pub enum BlockType {
 }
 
 #[derive(Debug, Clone)]
-struct ObjectChars {
-    is_module: bool,
-    is_component: bool,
-    is_pipe: bool,
-    selector: String,
+pub struct ObjectChars {
+    decor: String,
     name: String,
+    completed: bool,
+    count_attrs: usize,
 }
 
 impl ObjectChars {
-    pub fn new() -> ObjectChars {
+    fn new() -> ObjectChars {
         ObjectChars {
-            is_module: false,
-            is_component: false,
-            is_pipe: false,
-            selector: String::new(),
+            completed: false,
             name: String::new(),
+            decor: String::new(),
+            count_attrs: 0,
         }
     }
 
-    fn is_empty(self) -> bool {
-        self.is_module == false && self.is_component == false && self.is_pipe == false
-        //  && self.name.is_none()
+    pub fn is_module(&self) -> bool {
+        !self.decor.is_empty() && self.decor == "NgModule"
+    }
+
+    pub fn decorator(&self) -> Option<&str> {
+        if self.decor.is_empty() {
+            return None;
+        }
+        Some(self.decor.as_str())
+    }
+
+    pub fn class_name(&self) -> Option<&str> {
+        if self.name.is_empty() {
+            return None;
+        }
+        Some(self.name.as_str())
+    }
+
+    pub fn count_attrs(&self) -> usize {
+        self.count_attrs
+    }
+
+    fn is_empty(&self) -> bool {
+        self.decor.is_empty() && self.name.is_empty()
+    }
+
+    fn is_comlete(&self) -> bool {
+        !self.name.is_empty()
     }
 }
 
-const MAX_ELEMENTS: usize = 10;
+fn string_is_open(line: &str) -> bool {
+    let mut open_by: Option<char> = None;
+    let chars: Vec<char> = line.chars().collect();
+    for symb in chars {
+        if symb == '\'' || symb == '"' {
+            if open_by.is_none() {
+                open_by = Some(symb);
+            } else if open_by.unwrap() == symb {
+                open_by = None
+            }
+        }
+    }
+    open_by.is_some()
+}
+
+// fn mask_str(code: &str) -> String {
+//     let mut out: Vec<char> = vec![];
+//     let mut open_by: Option<char> = None;
+//     // let d = out.iter().collect::Vec<char>().concat();
+//     // code.chars().into_iter().map(|s|)
+//     let chars: Vec<char> = code.chars().collect();
+//     for symb in chars {
+//         if symb == '\'' || symb == '"' {
+//             if open_by.is_none() {
+//                 open_by = Some(symb);
+//             } else if open_by.unwrap() == symb {
+//                 open_by = None
+//             }
+//         }
+
+//         if open_by.is_some() {
+//             out.push('_');
+//         } else {
+//             out.push(symb);
+//         }
+//     }
+//     out.into_iter().collect::<String>()
+// }
+
+fn clear_comment(mut code: &str) -> String {
+    if code.starts_with("/*") || code.starts_with("*") || code.starts_with("//") {
+        code = "";
+        return code.to_string();
+    }
+    let parts = code.split("//").collect::<Vec<&str>>();
+    let mut out: Vec<&str> = vec![];
+    if parts.len() > 1 {
+        let mut idx = 0;
+        for part in parts {
+            if idx == 0 {
+                out.push(part);
+                continue;
+            }
+            if string_is_open(part) {
+                out.push("//");
+                out.push(part);
+            } else {
+                break;
+            }
+            idx += 1;
+        }
+        return out.concat();
+    }
+    return code.to_string();
+}
+
 #[derive(Debug, Clone)]
 struct FileCursor {
     elements: Vec<ObjectChars>,
@@ -47,14 +135,6 @@ struct FileCursor {
 }
 
 impl FileCursor {
-    fn clone(&self) -> Self {
-        return FileCursor {
-            elements: self.elements.clone(),
-            open: ObjectChars::new(),
-            blocks: self.blocks.clone(),
-        };
-    }
-
     fn new() -> FileCursor {
         FileCursor {
             elements: vec![],
@@ -63,24 +143,79 @@ impl FileCursor {
         }
     }
 
-    fn read_line(mut self, line: &str) {
-        let code = line.trim();
+    fn read_line(&mut self, line: &str) {
+        let code = &clear_comment(line.trim());
         if code.len() == 0 {
             return;
         }
-        if self.blocks.len() == 0 {
-            if let idx = code.find("@NgModule") {
-                // self.open = Some(ObjectChars::new());
-                self.open.is_module = true;
-                self.update_blocks(code, idx)
+        if self.is_root() {
+            // parse class object
+            let re_class =
+                Regex::new(r"(?<export>export)?[\s]?class (?<class_name>[\w]+)").unwrap();
+            let caps = re_class.captures(code);
+            match caps {
+                Some(_) => {
+                    let class_name = caps.unwrap().name("class_name").unwrap().as_str();
+                    self.open.name = class_name.to_string();
+                    self.update_blocks(code);
+                }
+                None => {}
             }
+
+            // parse decorator
+            if self.open.is_empty() {
+                let re_decor = Regex::new(r"^@(?<decorator>[0-9A-Za-z]*)").unwrap();
+                let caps = re_decor.captures(code);
+
+                match caps {
+                    Some(_) => {
+                        let decor = caps.unwrap().name("decorator").unwrap().as_str();
+                        self.open.decor = decor.to_string();
+                        self.update_blocks(code);
+                    }
+                    None => {}
+                }
+            }
+        } else {
+            self.check_attributes(code);
+            self.update_blocks(code);
         }
     }
-    fn update_blocks(mut self, line: &str, start: Option<usize>) {
-        let mut chars: Vec<char> = line.chars().collect();
-        if start.is_some() {
-            chars = chars.splice(0..start.unwrap(), []).collect()
+
+    fn check_attributes(&mut self, line: &str) {
+        if line == "}" {
+            return;
         }
+        if self.open.name.is_empty() || self.deep() != 1 || self.blocks[0] != '{' {
+            return;
+        }
+        let attr_re = Regex::new(
+            r"^(?<decor>@[0-9A-Za-z\s_]*\(.*\))?(?<name>[\$0-9A-Za-z\s_]+)(<[^>]+>)?[\?\:\=\;\(].*",
+        )
+        .unwrap();
+        let caps = attr_re.captures(line);
+        match caps {
+            Some(_) => self.open.count_attrs += 1,
+            None => {}
+        }
+    }
+
+    fn deep(&self) -> usize {
+        self.blocks.len()
+    }
+
+    fn get_open_char(&self, symb: char) -> Option<char> {
+        let list_block = [('{', '}'), ('(', ')')];
+        for item in list_block {
+            if item.1 == symb {
+                return Some(item.0);
+            }
+        }
+        return None;
+    }
+
+    fn update_blocks(&mut self, line: &str) {
+        let chars: Vec<char> = line.chars().collect();
         for symb in chars {
             if symb == '{' || symb == '(' {
                 self.blocks.push(symb)
@@ -88,10 +223,12 @@ impl FileCursor {
                 let last = self.blocks.last();
                 if last.is_some() {
                     let &l = last.unwrap();
-                    if l == symb {
+                    let open_char = self.get_open_char(symb).unwrap();
+                    if l == open_char {
                         // let last_unw
                         self.blocks.pop();
                     } else {
+                        dbg!(self);
                         panic!("Open block NOT EQUAL {} != {}", l, symb);
                     }
                 } else {
@@ -99,9 +236,15 @@ impl FileCursor {
                 }
             }
         }
+        // check component is completed
+        if self.open.is_comlete() && self.is_root() {
+            self.open.completed = true;
+            self.elements.push(self.open.clone());
+            self.open = ObjectChars::new();
+        }
     }
 
-    fn is_root(self) -> bool {
+    fn is_root(&self) -> bool {
         self.blocks.len() == 0
     }
 }
@@ -112,10 +255,6 @@ pub struct FileAnalizResult {
 }
 
 impl FileAnalizResult {
-    fn new() -> FileAnalizResult {
-        FileAnalizResult { items: vec![] }
-    }
-
     pub fn count_classes(self) -> usize {
         self.items
             .iter()
@@ -124,41 +263,17 @@ impl FileAnalizResult {
             .len()
     }
 
-    // pub fn class_names(&mut self) -> Vec<String> {
-    //     self.items.iter().filter(|x| x.name.is_some()).collect::<Vec<_>>()
-    // }
+    pub fn iter_elements(&self) -> std::slice::Iter<'_, ObjectChars> {
+        self.items.iter()
+    }
 }
 
 pub fn read_file(path: &Path) -> FileAnalizResult {
-    let mut result = FileAnalizResult::new();
-    let re_class = Regex::new(r"export class (?<class_name>[\w]+)").unwrap();
-    let cursor: FileCursor = FileCursor::new();
-    // let c = &cursor;
-    // fs::read_to_string(path).unwrap().lines().for_each(|f|cursor.read_line(f.to_string()));
+    let mut cursor: FileCursor = FileCursor::new();
     for line in fs::read_to_string(path).unwrap().lines() {
-        // result.push(line.to_string())
-        // cursor.blocks.push('1');
-        // cursor.blocks.push('{');
         cursor.read_line(line);
-        let caps = re_class.captures(line);
-        match caps {
-            Some(_) => {
-                let class_name = caps.unwrap().name("class_name").unwrap().as_str();
-                let mut obj_char = ObjectChars::new();
-                obj_char.name = class_name.to_string();
-                result.items.push(obj_char);
-                // stat.add_class(class_name.to_string());
-                // stat.count_class += 1;
-                continue;
-            }
-            None => {
-                continue;
-            }
-        }
-        // if re_class.is_match(line) {
-        //     stat.add_class(class_name.to_string());
-        //     stat.count_class += 1;
-        // }
     }
-    result
+    return FileAnalizResult {
+        items: cursor.elements,
+    };
 }
