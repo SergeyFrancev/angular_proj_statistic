@@ -1,2 +1,2 @@
-# angular_proj_statistic
+# ng_stat
 Parse statistic structure Angular project
